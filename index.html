@@ -275,49 +275,121 @@
     let appConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
     let isSpinning = false;
     let currentWheelRotation = 0; // 度数
+    let isAdminMode = true; // デフォルトは管理者表示（URLパラメータで制御）
+
+    // Web Audio API によるチクタク回転音
+    let audioCtx = null;
+    function playTickSound() {
+      try {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+        }
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 0.04);
+        gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.04);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.04);
+      } catch (e) {
+        // 音声非対応環境のフォールバック
+      }
+    }
 
     // ==========================================
     // 初期化処理
     // ==========================================
     window.addEventListener('DOMContentLoaded', () => {
-      lucide.createIcons();
       loadConfigFromUrl();
       applyConfigToUI();
       checkDrawStatus();
       drawRouletteWheel();
       populateAdminForm();
+      setupAdminSecretTrigger();
+      lucide.createIcons();
     });
 
     // ==========================================
-    // URLパラメータのエンコード/デコード
+    // URLエンコード & 参加者モード判定
     // ==========================================
-    // UTF-8対応のBase64エンコード
-    function utf8ToBase64(str) {
-      return window.btoa(unescape(encodeURIComponent(str)));
+    // 日本語文字化けを100%防止する安全なBase64
+    function safeEncodeBase64(str) {
+      return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (match, p1) => {
+        return String.fromCharCode('0x' + p1);
+      }));
     }
-    // UTF-8対応のBase64デコード
-    function base64ToUtf8(str) {
-      return decodeURIComponent(escape(window.atob(str)));
+
+    function safeDecodeBase64(str) {
+      return decodeURIComponent(Array.prototype.map.call(atob(str), (c) => {
+        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+      }).join(''));
     }
 
     function loadConfigFromUrl() {
+      // ハッシュ (#c=...) と クエリパラメータ (?c=...) の両方に対応
+      const hashStr = window.location.hash.substring(1);
       const urlParams = new URLSearchParams(window.location.search);
-      const campaignParam = urlParams.get('campaign');
-      if (campaignParam) {
+      const hashParams = new URLSearchParams(hashStr);
+
+      const campaignRaw = urlParams.get('c') || hashParams.get('c') || urlParams.get('campaign');
+      const forceAdmin = urlParams.get('admin') === '1' || hashParams.get('admin') === '1';
+
+      if (campaignRaw) {
         try {
-          const jsonString = base64ToUtf8(campaignParam);
+          const jsonString = safeDecodeBase64(campaignRaw);
           const parsed = JSON.parse(jsonString);
           if (parsed && parsed.prizes && parsed.prizes.length > 0) {
             appConfig = parsed;
           }
         } catch (e) {
-          console.error("URL設定の復号に失敗しました。デフォルト設定を使用します。", e);
+          console.error("企画データの復号に失敗しました:", e);
         }
+
+        // 配布用URLからアクセスした場合は参加者モード（管理者ボタンを隠す）
+        if (!forceAdmin) {
+          isAdminMode = false;
+        }
+      }
+
+      // 管理者UIの表示/非表示切り替え
+      const adminBtn = document.getElementById('adminToggleBtn');
+      if (!isAdminMode) {
+        adminBtn.style.display = 'none';
+      } else {
+        adminBtn.style.display = 'flex';
+      }
+    }
+
+    // 管理者が参加者URLを直接開いた場合でも復帰できる裏技（ロゴ3回クリック）
+    function setupAdminSecretTrigger() {
+      let clickCount = 0;
+      let timer = null;
+      const logo = document.querySelector('header span');
+      if (logo) {
+        logo.addEventListener('click', () => {
+          clickCount++;
+          clearTimeout(timer);
+          timer = setTimeout(() => { clickCount = 0; }, 1000);
+          if (clickCount >= 3) {
+            isAdminMode = true;
+            document.getElementById('adminToggleBtn').style.display = 'flex';
+            toggleAdminModal();
+            showToast("管理者モードを有効化しました");
+            clickCount = 0;
+          }
+        });
       }
     }
 
     function getCampaignId() {
-      // 企画ごとに固有のキーを生成（企画タイトルをベース）
+      // 企画ごとに一意のストレージキーを作成
       return 'lucky_draw_' + encodeURIComponent(appConfig.title || 'default');
     }
 
@@ -359,7 +431,7 @@
 
       let startAngle = 0;
 
-      prizes.forEach((prize, index) => {
+      prizes.forEach((prize) => {
         const sliceAngle = (Number(prize.weight || 1) / totalWeight) * 2 * Math.PI;
         const endAngle = startAngle + sliceAngle;
 
@@ -388,9 +460,9 @@
         ctx.shadowBlur = 4;
         
         // テキストの長さ調整
-        const maxTextLength = 14;
+        const maxTextLength = 12;
         const textToDisplay = prize.name.length > maxTextLength ? prize.name.substring(0, maxTextLength) + '...' : prize.name;
-        ctx.fillText(textToDisplay, radius - 25, 6);
+        ctx.fillText(textToDisplay, radius - 25, 7);
         ctx.restore();
 
         startAngle = endAngle;
@@ -425,7 +497,7 @@
       const prizes = appConfig.prizes;
       const totalWeight = prizes.reduce((sum, p) => sum + Number(p.weight || 1), 0);
 
-      // 確率に基づいて当選賞品をあらかじめ選出
+      // 確率（比率）に基づいた抽選計算
       let randomVal = Math.random() * totalWeight;
       let winningIndex = 0;
       let accumulated = 0;
@@ -438,20 +510,16 @@
         }
       }
 
-      // ルーレットの回転角度計算
-      // ポインターは真上（270度 = 1.5 * PI）
+      // ルーレット停止角の計算 (真上の針 = 270度)
       let currentAngleAccum = 0;
       for (let i = 0; i < winningIndex; i++) {
         currentAngleAccum += (Number(prizes[i].weight || 1) / totalWeight) * 360;
       }
       const sliceDeg = (Number(prizes[winningIndex].weight || 1) / totalWeight) * 360;
-      // 当選セクタの中央に止まるようにオフセット
       const winningCenterDeg = currentAngleAccum + sliceDeg / 2;
       
-      // Canvas上の0度は右方向(3時)。ポインタは上(12時 = 270度)。
-      // 停止時に winningCenterDeg が 270度に一致する回転角を算出
       const targetDeg = (270 - winningCenterDeg + 360) % 360;
-      const extraSpins = 5 * 360; // 5回転分の演出
+      const extraSpins = 6 * 360; // 6回転
       const finalRotation = currentWheelRotation + extraSpins + (targetDeg - (currentWheelRotation % 360) + 360) % 360;
       
       currentWheelRotation = finalRotation;
@@ -460,14 +528,22 @@
       wheelWrapper.classList.add('wheel-rotate-transition');
       wheelWrapper.style.transform = `rotate(${currentWheelRotation}deg)`;
 
-      // 抽選ボタンを無効化
+      // チクタク効果音の間欠再生
+      let soundCount = 0;
+      const soundInterval = setInterval(() => {
+        playTickSound();
+        soundCount++;
+        if (soundCount > 35) clearInterval(soundInterval);
+      }, 120);
+
       const drawButton = document.getElementById('drawButton');
       drawButton.disabled = true;
       drawButton.classList.add('opacity-75');
 
-      // 5秒のアニメーション後に結果表示
+      // 5秒のアニメーション終了後
       setTimeout(() => {
         isSpinning = false;
+        clearInterval(soundInterval);
         wheelWrapper.classList.remove('wheel-rotate-transition');
         const wonPrize = prizes[winningIndex];
         
@@ -492,8 +568,8 @@
     function triggerConfetti(isWin) {
       if (typeof confetti === 'function') {
         confetti({
-          particleCount: isWin ? 120 : 40,
-          spread: 70,
+          particleCount: isWin ? 140 : 40,
+          spread: 80,
           origin: { y: 0.6 }
         });
       }
@@ -635,19 +711,31 @@
       drawRouletteWheel();
 
       const jsonStr = JSON.stringify(appConfig);
-      const encoded = utf8ToBase64(jsonStr);
+      const encoded = safeEncodeBase64(jsonStr);
       
-      const baseUrl = window.location.origin + window.location.pathname;
-      const shareUrl = `${baseUrl}?campaign=${encoded}`;
+      // ハッシュ (#c=...) を用いて確実にパラメータを渡す（サーバーのリダイレクトやクエリ欠落を完全回避）
+      const cleanUrl = window.location.origin + window.location.pathname;
+      const shareUrl = `${cleanUrl}#c=${encoded}`;
 
-      // クリップボードにコピー
       copyToClipboard(shareUrl);
-      showToast("配布用URLをクリップボードにコピーしました！");
+      showToast("参加者用の配布URLをコピーしました！");
     }
 
     function copyToClipboard(text) {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).catch(() => {
+          fallbackCopyText(text);
+        });
+      } else {
+        fallbackCopyText(text);
+      }
+    }
+
+    function fallbackCopyText(text) {
       const textarea = document.createElement("textarea");
       textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.left = "-9999px";
       document.body.appendChild(textarea);
       textarea.select();
       try {
