@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>くじ引きプレゼント企画</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Canvas Confetti (紙吹雪演出) -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700;800;900&family=Inter:wght@400;600;700&display=swap');
+    body {
+      font-family: 'M PLUS Rounded 1c', 'Inter', sans-serif;
+    }
+    /* ルーレットのポインター三角形 */
+    .roulette-arrow {
+      width: 0;
+      height: 0;
+      border-left: 18px solid transparent;
+      border-right: 18px solid transparent;
+      border-top: 32px solid #ef4444;
+      filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3));
+    }
+    /* スムーズなアニメーション用 */
+    .wheel-rotate-transition {
+      transition: transform 5s cubic-bezier(0.15, 0.9, 0.2, 1);
+    }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 min-h-screen text-slate-800 flex flex-col justify-between">
+
+  <!-- ヘッダー -->
+  <header class="w-full bg-slate-900/60 backdrop-blur-md border-b border-white/10 px-4 py-3 sticky top-0 z-40">
+    <div class="max-w-4xl mx-auto flex items-center justify-between">
+      <div class="flex items-center space-x-2 text-white">
+        <i data-lucide="gift" class="w-7 h-7 text-pink-400 animate-bounce"></i>
+        <span class="font-extrabold text-lg sm:text-xl tracking-wide bg-clip-text text-transparent bg-gradient-to-r from-pink-300 via-yellow-200 to-amber-400">
+          LuckyLottery
+        </span>
+      </div>
+      
+      <!-- 管理者モードトグルボタン -->
+      <button id="adminToggleBtn" onclick="toggleAdminModal()" class="flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm font-semibold rounded-full bg-white/10 hover:bg-white/20 text-white/90 border border-white/20 transition-all shadow-sm">
+        <i data-lucide="settings" class="w-4 h-4 text-amber-300"></i>
+        <span id="adminToggleLabel">管理者設定</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- メインコンテンツ -->
+  <main class="flex-grow flex items-center justify-center p-4">
+    <div class="max-w-md w-full">
+      
+      <!-- 参加者向け：くじ引きカード -->
+      <div class="bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl p-6 sm:p-8 border border-white/40 text-center relative overflow-hidden">
+        
+        <!-- 背景の装飾光彩 -->
+        <div class="absolute -top-16 -right-16 w-36 h-36 bg-pink-400/20 rounded-full blur-2xl pointer-events-none"></div>
+        <div class="absolute -bottom-16 -left-16 w-36 h-36 bg-indigo-400/20 rounded-full blur-2xl pointer-events-none"></div>
+
+        <!-- 企画タイトル＆説明 -->
+        <div class="mb-5">
+          <span class="inline-block px-3 py-1 rounded-full text-xs font-bold bg-pink-100 text-pink-600 mb-2 tracking-wide">
+            PRESENT CAMPAIGN
+          </span>
+          <h1 id="displayTitle" class="text-2xl sm:text-3xl font-extrabold text-slate-900 leading-snug">
+            Xプレゼント企画
+          </h1>
+          <p id="displayDesc" class="text-xs sm:text-sm text-slate-600 mt-2">
+            ボタンをタップしてくじを引こう！豪華賞品が当たるチャンス！
+          </p>
+        </div>
+
+        <!-- ルーレットステージ -->
+        <div class="relative w-64 h-64 sm:w-72 sm:h-72 mx-auto my-6 flex items-center justify-center">
+          <!-- 上部ポインター矢印 -->
+          <div class="absolute -top-3 z-20 roulette-arrow"></div>
+
+          <!-- キャンバス（ルーレット盤面） -->
+          <div id="wheelWrapper" class="w-full h-full rounded-full shadow-inner p-1.5 bg-gradient-to-tr from-amber-400 via-pink-400 to-indigo-500">
+            <canvas id="rouletteCanvas" width="500" height="500" class="w-full h-full rounded-full bg-white shadow-xl cursor-default"></canvas>
+          </div>
+
+          <!-- 中心のデコレーションピン -->
+          <div class="absolute z-10 w-12 h-12 rounded-full bg-white shadow-lg border-4 border-amber-300 flex items-center justify-center">
+            <i data-lucide="sparkles" class="w-5 h-5 text-amber-500"></i>
+          </div>
+        </div>
+
+        <!-- くじ引き実行ボタンエリア -->
+        <div class="space-y-3">
+          <button id="drawButton" onclick="startDraw()" class="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-amber-400 via-pink-500 to-rose-500 hover:from-amber-500 hover:via-pink-600 hover:to-rose-600 text-white font-black text-lg sm:text-xl shadow-lg hover:shadow-pink-500/30 transform active:scale-95 transition duration-150 flex items-center justify-center gap-2">
+            <i data-lucide="play" class="w-6 h-6 fill-current"></i>
+            <span>くじを引く！</span>
+          </button>
+
+          <!-- 抽選済み時のステータス表示 -->
+          <div id="alreadyPlayedNotice" class="hidden py-3 px-4 rounded-xl bg-slate-100 text-slate-600 text-xs sm:text-sm border border-slate-200">
+            <p class="font-semibold text-slate-800">抽選はお一人様1回までです</p>
+            <button onclick="showCachedResult()" class="text-pink-600 underline text-xs mt-1 font-bold">
+              前回の当選結果を再確認する
+            </button>
+          </div>
+        </div>
+
+        <!-- 賞品ラインナップ簡易アコーディオン -->
+        <div class="mt-6 pt-4 border-t border-slate-100">
+          <p class="text-xs font-bold text-slate-500 mb-2 flex items-center justify-center gap-1">
+            <i data-lucide="award" class="w-3.5 h-3.5"></i> 当選賞品リスト
+          </p>
+          <div id="prizesBadgeList" class="flex flex-wrap justify-center gap-1.5 max-h-24 overflow-y-auto p-1">
+            <!-- JSで動的にバッジ挿入 -->
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <!-- フッター -->
+  <footer class="text-center py-4 text-xs text-white/50">
+    &copy; LuckyLottery - Browser Pure Client App
+  </footer>
+
+  <!-- ==================== 管理者設定モーダル ==================== -->
+  <div id="adminModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-xl w-full p-6 sm:p-8 my-auto relative border border-slate-200 max-h-[90vh] flex flex-col">
+      
+      <!-- ヘッダー -->
+      <div class="flex items-center justify-between pb-4 border-b border-slate-100">
+        <div class="flex items-center gap-2">
+          <div class="p-2 rounded-xl bg-pink-100 text-pink-600">
+            <i data-lucide="sliders" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h2 class="text-lg font-extrabold text-slate-800">プレゼント企画の管理・URL作成</h2>
+            <p class="text-xs text-slate-500">ここでの設定をURL化して参加者にシェアします</p>
+          </div>
+        </div>
+        <button onclick="toggleAdminModal()" class="p-1.5 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- 設定フォーム本体（スクロール可） -->
+      <div class="overflow-y-auto flex-grow py-4 space-y-5 text-left text-sm pr-1">
+        
+        <!-- タイトル設定 -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">企画タイトル</label>
+          <input type="text" id="adminInputTitle" class="w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-pink-400 focus:outline-none" placeholder="例: Twitter 1万人感謝プレゼント企画">
+        </div>
+
+        <!-- 説明文設定 -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 uppercase mb-1">説明文・応募規約</label>
+          <textarea id="adminInputDesc" rows="2" class="w-full px-3 py-2 border rounded-xl focus:ring-2 focus:ring-pink-400 focus:outline-none" placeholder="例: 当選した方はDMでスクショを送ってください！"></textarea>
+        </div>
+
+        <!-- 賞品リスト設定 -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <label class="block text-xs font-bold text-slate-700 uppercase">賞品・当選比率の設定</label>
+            <button onclick="addPrizeRow()" class="px-2.5 py-1 text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-lg border border-indigo-200 flex items-center gap-1">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i> 賞品を追加
+            </button>
+          </div>
+          
+          <div id="prizeRowsContainer" class="space-y-2 max-h-56 overflow-y-auto p-1 bg-slate-50 rounded-xl border border-slate-100">
+            <!-- 動的に賞品入力行を追加 -->
+          </div>
+          <p class="text-[11px] text-slate-400 mt-1">※ 比率は重み（ウェイト）です。例えば10と90なら1:9の確率になります。</p>
+        </div>
+
+        <!-- 参加制限オプション -->
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2.5">
+          <i data-lucide="shield-alert" class="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5"></i>
+          <div>
+            <h4 class="text-xs font-bold text-amber-900">1人1回制限について</h4>
+            <p class="text-xs text-amber-700 mt-0.5 leading-relaxed">
+              参加者の端末（LocalStorage）に抽選結果を保存し、同一ブラウザでの二重引きを抑制します。<br>
+              ※ テスト時は下の「端末の抽選履歴をリセット」で何度でも試せます。
+            </p>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- モーダルフッター・共有ボタン -->
+      <div class="pt-4 border-t border-slate-100 space-y-2">
+        <button onclick="generateAndCopyShareUrl()" class="w-full py-3 px-4 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-extrabold rounded-xl shadow-md flex items-center justify-center gap-2">
+          <i data-lucide="share-2" class="w-4 h-4"></i>
+          <span>配布用URLを発行＆コピー</span>
+        </button>
+        <div class="flex gap-2">
+          <button onclick="applyAdminSettingsToPreview()" class="flex-1 py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition">
+            プレビュー更新
+          </button>
+          <button onclick="resetLocalDrawHistory()" class="py-2 px-3 text-red-600 hover:bg-red-50 text-xs font-bold rounded-xl border border-red-200 transition">
+            テスト履歴消去
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ==================== 当選結果ポップアップモーダル ==================== -->
+  <div id="resultModal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-sm w-full p-6 text-center border-4 border-amber-300 relative transform transition-all duration-300 scale-95 opacity-0" id="resultModalCard">
+      
+      <!-- 当選スタンプ/アイコン -->
+      <div class="w-20 h-20 mx-auto -mt-14 rounded-full bg-gradient-to-tr from-amber-400 to-yellow-200 border-4 border-white shadow-xl flex items-center justify-center">
+        <span class="text-3xl" id="resultIcon">🎉</span>
+      </div>
+
+      <div class="mt-4">
+        <p class="text-xs font-extrabold tracking-wider uppercase text-pink-600">LOTTERY RESULT</p>
+        <h3 class="text-xl font-black text-slate-800 mt-1">抽選結果</h3>
+        
+        <!-- 当選カード（スクショ用） -->
+        <div id="captureCard" class="my-5 p-5 rounded-2xl bg-gradient-to-b from-slate-50 to-slate-100 border border-slate-200 shadow-inner">
+          <p class="text-xs text-slate-500" id="resultCampaignLabel">フォロワー感謝プレゼント企画</p>
+          <div id="resultPrizeName" class="text-2xl font-black text-indigo-900 my-2 break-words">
+            特賞: Amazonギフト券
+          </div>
+          <p id="resultPrizeMessage" class="text-xs text-slate-600 mt-1 leading-relaxed">
+            おめでとうございます！画面のスクリーンショットを保管してください。
+          </p>
+          <div class="mt-3 pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px] text-slate-400">
+            <span id="resultTimestamp">2026/11/16 00:00</span>
+            <span class="font-mono" id="resultVerificationCode">CODE: #0000</span>
+          </div>
+        </div>
+
+        <!-- シェア & 完了ボタン -->
+        <div class="space-y-2">
+          <button onclick="shareToTwitter()" class="w-full py-2.5 px-4 bg-black hover:bg-slate-800 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 transition shadow">
+            <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+            <span>結果をX（Twitter）でシェア</span>
+          </button>
+          
+          <button onclick="closeResultModal()" class="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition">
+            閉じる
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 通知トースト -->
+  <div id="toastMessage" class="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-slate-900/90 text-white px-5 py-2.5 rounded-full text-xs sm:text-sm font-semibold shadow-2xl z-50 pointer-events-none opacity-0 transition-opacity duration-300 flex items-center gap-2">
+    <i data-lucide="check" class="w-4 h-4 text-emerald-400"></i>
+    <span id="toastText">コピーしました</span>
+  </div>
+
+  <script>
+    // ==========================================
+    // 状態管理 & 初期プリセット
+    // ==========================================
+    const DEFAULT_CONFIG = {
+      title: "フォロワー感謝プレゼント企画",
+      desc: "ボタンをタップして運試しくじを引こう！豪華賞品が当たるチャンス！",
+      prizes: [
+        { name: "特賞: ギフト券 10,000円分", weight: 5, color: "#f59e0b", isWin: true, message: "大当たりの特賞です！DMよりご連絡ください！" },
+        { name: "1等: ギフト券 3,000円分", weight: 15, color: "#ec4899", isWin: true, message: "おめでとうございます！1等当選です！" },
+        { name: "2等: 限定ステッカー", weight: 30, color: "#8b5cf6", isWin: true, message: "2等のオリジナルグッズ獲得です！" },
+        { name: "参加賞: デジタル壁紙", weight: 50, color: "#3b82f6", isWin: false, message: "ご参加ありがとうございます！壁紙をプレゼント！" }
+      ]
+    };
+
+    let appConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+    let isSpinning = false;
+    let currentWheelRotation = 0; // 度数
+
+    // ==========================================
+    // 初期化処理
+    // ==========================================
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      loadConfigFromUrl();
+      applyConfigToUI();
+      checkDrawStatus();
+      drawRouletteWheel();
+      populateAdminForm();
+    });
+
+    // ==========================================
+    // URLパラメータのエンコード/デコード
+    // ==========================================
+    // UTF-8対応のBase64エンコード
+    function utf8ToBase64(str) {
+      return window.btoa(unescape(encodeURIComponent(str)));
+    }
+    // UTF-8対応のBase64デコード
+    function base64ToUtf8(str) {
+      return decodeURIComponent(escape(window.atob(str)));
+    }
+
+    function loadConfigFromUrl() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const campaignParam = urlParams.get('campaign');
+      if (campaignParam) {
+        try {
+          const jsonString = base64ToUtf8(campaignParam);
+          const parsed = JSON.parse(jsonString);
+          if (parsed && parsed.prizes && parsed.prizes.length > 0) {
+            appConfig = parsed;
+          }
+        } catch (e) {
+          console.error("URL設定の復号に失敗しました。デフォルト設定を使用します。", e);
+        }
+      }
+    }
+
+    function getCampaignId() {
+      // 企画ごとに固有のキーを生成（企画タイトルをベース）
+      return 'lucky_draw_' + encodeURIComponent(appConfig.title || 'default');
+    }
+
+    // ==========================================
+    // UI反映 & ルーレット描画
+    // ==========================================
+    function applyConfigToUI() {
+      document.getElementById('displayTitle').innerText = appConfig.title || "プレゼント企画";
+      document.getElementById('displayDesc').innerText = appConfig.desc || "";
+      document.title = (appConfig.title || "くじ引きプレゼント企画") + " - LuckyLottery";
+
+      // 賞品バッジ
+      const badgeContainer = document.getElementById('prizesBadgeList');
+      badgeContainer.innerHTML = '';
+      appConfig.prizes.forEach(prize => {
+        const badge = document.createElement('span');
+        badge.className = "text-[11px] font-bold px-2 py-0.5 rounded-full border text-white";
+        badge.style.backgroundColor = prize.color;
+        badge.style.borderColor = prize.color;
+        badge.innerText = prize.name;
+        badgeContainer.appendChild(badge);
+      });
+    }
+
+    // Canvasでのルーレット盤面描画
+    function drawRouletteWheel() {
+      const canvas = document.getElementById('rouletteCanvas');
+      const ctx = canvas.getContext('2d');
+      const prizes = appConfig.prizes;
+      const numPrizes = prizes.length;
+      if (numPrizes === 0) return;
+
+      const totalWeight = prizes.reduce((sum, p) => sum + Number(p.weight || 1), 0);
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
+      const radius = canvas.width / 2 - 10;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      let startAngle = 0;
+
+      prizes.forEach((prize, index) => {
+        const sliceAngle = (Number(prize.weight || 1) / totalWeight) * 2 * Math.PI;
+        const endAngle = startAngle + sliceAngle;
+
+        // セクタ塗りつぶし
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.arc(centerX, centerY, radius, startAngle, endAngle);
+        ctx.closePath();
+        ctx.fillStyle = prize.color || '#6366f1';
+        ctx.fill();
+
+        // 境界線
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+
+        // テキスト描画
+        ctx.save();
+        ctx.translate(centerX, centerY);
+        const midAngle = startAngle + sliceAngle / 2;
+        ctx.rotate(midAngle);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 20px "M PLUS Rounded 1c", sans-serif';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+        ctx.shadowBlur = 4;
+        
+        // テキストの長さ調整
+        const maxTextLength = 14;
+        const textToDisplay = prize.name.length > maxTextLength ? prize.name.substring(0, maxTextLength) + '...' : prize.name;
+        ctx.fillText(textToDisplay, radius - 25, 6);
+        ctx.restore();
+
+        startAngle = endAngle;
+      });
+    }
+
+    // ==========================================
+    // くじ引き・抽選ロジック
+    // ==========================================
+    function checkDrawStatus() {
+      const stored = localStorage.getItem(getCampaignId());
+      const drawButton = document.getElementById('drawButton');
+      const notice = document.getElementById('alreadyPlayedNotice');
+
+      if (stored) {
+        drawButton.classList.add('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
+        notice.classList.remove('hidden');
+      } else {
+        drawButton.classList.remove('opacity-50', 'cursor-not-allowed', 'pointer-events-none');
+        notice.classList.add('hidden');
+      }
+    }
+
+    function startDraw() {
+      if (isSpinning) return;
+      if (localStorage.getItem(getCampaignId())) {
+        showToast("すでに抽選済みです");
+        return;
+      }
+
+      isSpinning = true;
+      const prizes = appConfig.prizes;
+      const totalWeight = prizes.reduce((sum, p) => sum + Number(p.weight || 1), 0);
+
+      // 確率に基づいて当選賞品をあらかじめ選出
+      let randomVal = Math.random() * totalWeight;
+      let winningIndex = 0;
+      let accumulated = 0;
+
+      for (let i = 0; i < prizes.length; i++) {
+        accumulated += Number(prizes[i].weight || 1);
+        if (randomVal <= accumulated) {
+          winningIndex = i;
+          break;
+        }
+      }
+
+      // ルーレットの回転角度計算
+      // ポインターは真上（270度 = 1.5 * PI）
+      let currentAngleAccum = 0;
+      for (let i = 0; i < winningIndex; i++) {
+        currentAngleAccum += (Number(prizes[i].weight || 1) / totalWeight) * 360;
+      }
+      const sliceDeg = (Number(prizes[winningIndex].weight || 1) / totalWeight) * 360;
+      // 当選セクタの中央に止まるようにオフセット
+      const winningCenterDeg = currentAngleAccum + sliceDeg / 2;
+      
+      // Canvas上の0度は右方向(3時)。ポインタは上(12時 = 270度)。
+      // 停止時に winningCenterDeg が 270度に一致する回転角を算出
+      const targetDeg = (270 - winningCenterDeg + 360) % 360;
+      const extraSpins = 5 * 360; // 5回転分の演出
+      const finalRotation = currentWheelRotation + extraSpins + (targetDeg - (currentWheelRotation % 360) + 360) % 360;
+      
+      currentWheelRotation = finalRotation;
+
+      const wheelWrapper = document.getElementById('wheelWrapper');
+      wheelWrapper.classList.add('wheel-rotate-transition');
+      wheelWrapper.style.transform = `rotate(${currentWheelRotation}deg)`;
+
+      // 抽選ボタンを無効化
+      const drawButton = document.getElementById('drawButton');
+      drawButton.disabled = true;
+      drawButton.classList.add('opacity-75');
+
+      // 5秒のアニメーション後に結果表示
+      setTimeout(() => {
+        isSpinning = false;
+        wheelWrapper.classList.remove('wheel-rotate-transition');
+        const wonPrize = prizes[winningIndex];
+        
+        // 当選データを端末に保存
+        const resultPayload = {
+          prize: wonPrize,
+          timestamp: new Date().toLocaleString('ja-JP'),
+          code: 'WIN-' + Math.random().toString(36).substring(2, 8).toUpperCase(),
+          campaignTitle: appConfig.title
+        };
+        localStorage.setItem(getCampaignId(), JSON.stringify(resultPayload));
+
+        // 紙吹雪エフェクト
+        triggerConfetti(wonPrize.isWin);
+
+        // 結果モーダル表示
+        displayResult(resultPayload);
+        checkDrawStatus();
+      }, 5000);
+    }
+
+    function triggerConfetti(isWin) {
+      if (typeof confetti === 'function') {
+        confetti({
+          particleCount: isWin ? 120 : 40,
+          spread: 70,
+          origin: { y: 0.6 }
+        });
+      }
+    }
+
+    function displayResult(resultData) {
+      const modal = document.getElementById('resultModal');
+      const card = document.getElementById('resultModalCard');
+      
+      document.getElementById('resultCampaignLabel').innerText = resultData.campaignTitle || appConfig.title;
+      document.getElementById('resultPrizeName').innerText = resultData.prize.name;
+      document.getElementById('resultPrizeMessage').innerText = resultData.prize.message || (resultData.prize.isWin ? "おめでとうございます！" : "ご参加ありがとうございました！");
+      document.getElementById('resultTimestamp').innerText = resultData.timestamp;
+      document.getElementById('resultVerificationCode').innerText = "CODE: #" + (resultData.code || "SUCCESS");
+      document.getElementById('resultIcon').innerText = resultData.prize.isWin ? "🎉" : "✨";
+
+      modal.classList.remove('hidden');
+      setTimeout(() => {
+        card.classList.remove('scale-95', 'opacity-0');
+        card.classList.add('scale-100', 'opacity-100');
+      }, 10);
+    }
+
+    function showCachedResult() {
+      const stored = localStorage.getItem(getCampaignId());
+      if (stored) {
+        displayResult(JSON.parse(stored));
+      }
+    }
+
+    function closeResultModal() {
+      const modal = document.getElementById('resultModal');
+      const card = document.getElementById('resultModalCard');
+      card.classList.remove('scale-100', 'opacity-100');
+      card.classList.add('scale-95', 'opacity-0');
+      setTimeout(() => {
+        modal.classList.add('hidden');
+      }, 200);
+    }
+
+    // SNSシェア（X / Twitter）
+    function shareToTwitter() {
+      const stored = localStorage.getItem(getCampaignId());
+      let text = `【${appConfig.title}】に参加しました！`;
+      if (stored) {
+        const data = JSON.parse(stored);
+        text += `\n抽選結果：『${data.prize.name}』が当たりました！🎯\n認証コード: ${data.code}`;
+      }
+      const shareUrl = window.location.href;
+      const twitterIntent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(shareUrl)}`;
+      window.open(twitterIntent, '_blank');
+    }
+
+    // ==========================================
+    // 管理者パネル・設定フォーム
+    // ==========================================
+    function toggleAdminModal() {
+      const modal = document.getElementById('adminModal');
+      modal.classList.toggle('hidden');
+      if (!modal.classList.contains('hidden')) {
+        populateAdminForm();
+      }
+    }
+
+    function populateAdminForm() {
+      document.getElementById('adminInputTitle').value = appConfig.title || "";
+      document.getElementById('adminInputDesc').value = appConfig.desc || "";
+      renderAdminPrizeRows();
+    }
+
+    function renderAdminPrizeRows() {
+      const container = document.getElementById('prizeRowsContainer');
+      container.innerHTML = '';
+      appConfig.prizes.forEach((prize, idx) => {
+        const row = document.createElement('div');
+        row.className = "flex items-center gap-2 p-2 bg-white rounded-lg border border-slate-200 shadow-sm";
+        row.innerHTML = `
+          <input type="color" value="${prize.color || '#ec4899'}" onchange="updatePrizeProp(${idx}, 'color', this.value)" class="w-8 h-8 rounded cursor-pointer border-0 p-0 flex-shrink-0">
+          <input type="text" value="${prize.name}" onchange="updatePrizeProp(${idx}, 'name', this.value)" placeholder="賞品名" class="flex-grow px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-pink-400">
+          <div class="flex items-center gap-1 flex-shrink-0">
+            <span class="text-[10px] text-slate-400">比率</span>
+            <input type="number" min="1" max="1000" value="${prize.weight}" onchange="updatePrizeProp(${idx}, 'weight', Number(this.value))" class="w-14 px-1.5 py-1 text-xs border rounded text-center">
+          </div>
+          <button onclick="removePrizeRow(${idx})" class="text-slate-400 hover:text-red-500 p-1">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </button>
+        `;
+        container.appendChild(row);
+      });
+      lucide.createIcons();
+    }
+
+    function updatePrizeProp(index, prop, value) {
+      if (appConfig.prizes[index]) {
+        appConfig.prizes[index][prop] = value;
+      }
+    }
+
+    function addPrizeRow() {
+      const palette = ["#f59e0b", "#ec4899", "#8b5cf6", "#3b82f6", "#10b981", "#ef4444"];
+      const randomColor = palette[appConfig.prizes.length % palette.length];
+      appConfig.prizes.push({
+        name: `賞品 ${appConfig.prizes.length + 1}`,
+        weight: 10,
+        color: randomColor,
+        isWin: true,
+        message: "当選おめでとうございます！"
+      });
+      renderAdminPrizeRows();
+    }
+
+    function removePrizeRow(index) {
+      if (appConfig.prizes.length <= 2) {
+        showToast("賞品は最低2つ必要です");
+        return;
+      }
+      appConfig.prizes.splice(index, 1);
+      renderAdminPrizeRows();
+    }
+
+    function syncFormToConfig() {
+      appConfig.title = document.getElementById('adminInputTitle').value.trim() || "プレゼント企画";
+      appConfig.desc = document.getElementById('adminInputDesc').value.trim() || "";
+    }
+
+    function applyAdminSettingsToPreview() {
+      syncFormToConfig();
+      applyConfigToUI();
+      drawRouletteWheel();
+      checkDrawStatus();
+      showToast("プレビューに反映しました！");
+      toggleAdminModal();
+    }
+
+    // 配布用URL発行 & コピー
+    function generateAndCopyShareUrl() {
+      syncFormToConfig();
+      applyConfigToUI();
+      drawRouletteWheel();
+
+      const jsonStr = JSON.stringify(appConfig);
+      const encoded = utf8ToBase64(jsonStr);
+      
+      const baseUrl = window.location.origin + window.location.pathname;
+      const shareUrl = `${baseUrl}?campaign=${encoded}`;
+
+      // クリップボードにコピー
+      copyToClipboard(shareUrl);
+      showToast("配布用URLをクリップボードにコピーしました！");
+    }
+
+    function copyToClipboard(text) {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+      } catch (err) {
+        console.error('Copy failed', err);
+      }
+      document.body.removeChild(textarea);
+    }
+
+    // テスト用の履歴消去
+    function resetLocalDrawHistory() {
+      localStorage.removeItem(getCampaignId());
+      checkDrawStatus();
+      showToast("このブラウザの抽選履歴を消去しました");
+    }
+
+    // トースト通知表示
+    function showToast(message) {
+      const toast = document.getElementById('toastMessage');
+      document.getElementById('toastText').innerText = message;
+      toast.classList.remove('opacity-0');
+      toast.classList.add('opacity-100');
+      setTimeout(() => {
+        toast.classList.remove('opacity-100');
+        toast.classList.add('opacity-0');
+      }, 2500);
+    }
+  </script>
+</body>
+</html>
