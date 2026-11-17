@@ -307,52 +307,88 @@
     // 初期化処理
     // ==========================================
     window.addEventListener('DOMContentLoaded', () => {
-      loadConfigFromUrl();
+      const isLoadedFromCampaign = loadConfigFromUrl();
       applyConfigToUI();
       checkDrawStatus();
       drawRouletteWheel();
       populateAdminForm();
       setupAdminSecretTrigger();
       lucide.createIcons();
+
+      if (isLoadedFromCampaign) {
+        showToast(`企画「${appConfig.title}」を読み込みました`);
+      }
     });
 
     // ==========================================
     // URLエンコード & 参加者モード判定
     // ==========================================
-    // 日本語文字化けを100%防止する安全なBase64
+    // 日本語を完全に壊さず扱えるBase64
     function safeEncodeBase64(str) {
-      return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (match, p1) => {
-        return String.fromCharCode('0x' + p1);
-      }));
+      try {
+        return btoa(unescape(encodeURIComponent(str)));
+      } catch (e) {
+        return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (_, p1) => String.fromCharCode('0x' + p1)));
+      }
     }
 
     function safeDecodeBase64(str) {
-      return decodeURIComponent(Array.prototype.map.call(atob(str), (c) => {
-        return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-      }).join(''));
+      try {
+        return decodeURIComponent(escape(atob(str)));
+      } catch (e) {
+        return decodeURIComponent(Array.prototype.map.call(atob(str), (c) => {
+          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+      }
+    }
+
+    function extractParamFromUrl(key) {
+      // 1. URLSearchParams (クエリ ?c=...)
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has(key)) return urlParams.get(key);
+
+      // 2. ハッシュ (#c=... or #/?c=...)
+      let hash = window.location.hash;
+      if (hash.startsWith('#')) hash = hash.substring(1);
+      if (hash.startsWith('/')) hash = hash.substring(1);
+      if (hash.startsWith('?')) hash = hash.substring(1);
+
+      const hashParams = new URLSearchParams(hash);
+      if (hashParams.has(key)) return hashParams.get(key);
+
+      // 3. 正規表現でのフォールバック
+      const match = window.location.href.match(new RegExp('[#&?]' + key + '=([^&#]*)'));
+      return match ? decodeURIComponent(match[1]) : null;
     }
 
     function loadConfigFromUrl() {
-      // ハッシュ (#c=...) と クエリパラメータ (?c=...) の両方に対応
-      const hashStr = window.location.hash.substring(1);
-      const urlParams = new URLSearchParams(window.location.search);
-      const hashParams = new URLSearchParams(hashStr);
-
-      const campaignRaw = urlParams.get('c') || hashParams.get('c') || urlParams.get('campaign');
-      const forceAdmin = urlParams.get('admin') === '1' || hashParams.get('admin') === '1';
+      const campaignRaw = extractParamFromUrl('c') || extractParamFromUrl('campaign');
+      const forceAdmin = extractParamFromUrl('admin') === '1';
+      let success = false;
 
       if (campaignRaw) {
         try {
-          const jsonString = safeDecodeBase64(campaignRaw);
+          const jsonString = safeDecodeBase64(campaignRaw.trim());
           const parsed = JSON.parse(jsonString);
-          if (parsed && parsed.prizes && parsed.prizes.length > 0) {
-            appConfig = parsed;
+          if (parsed && Array.isArray(parsed.prizes) && parsed.prizes.length > 0) {
+            appConfig = {
+              title: parsed.title || DEFAULT_CONFIG.title,
+              desc: parsed.desc || "",
+              prizes: parsed.prizes.map((p, idx) => ({
+                name: p.name || `賞品 ${idx + 1}`,
+                weight: Number(p.weight) > 0 ? Number(p.weight) : 10,
+                color: p.color || '#ec4899',
+                isWin: typeof p.isWin === 'boolean' ? p.isWin : true,
+                message: p.message || "当選おめでとうございます！"
+              }))
+            };
+            success = true;
           }
         } catch (e) {
-          console.error("企画データの復号に失敗しました:", e);
+          console.error("企画データの復号・パースに失敗しました:", e);
         }
 
-        // 配布用URLからアクセスした場合は参加者モード（管理者ボタンを隠す）
+        // 配布URLから来た場合は管理者設定ボタンを非表示
         if (!forceAdmin) {
           isAdminMode = false;
         }
@@ -360,11 +396,11 @@
 
       // 管理者UIの表示/非表示切り替え
       const adminBtn = document.getElementById('adminToggleBtn');
-      if (!isAdminMode) {
-        adminBtn.style.display = 'none';
-      } else {
-        adminBtn.style.display = 'flex';
+      if (adminBtn) {
+        adminBtn.style.display = (!isAdminMode) ? 'none' : 'flex';
       }
+
+      return success;
     }
 
     // 管理者が参加者URLを直接開いた場合でも復帰できる裏技（ロゴ3回クリック）
@@ -389,8 +425,9 @@
     }
 
     function getCampaignId() {
-      // 企画ごとに一意のストレージキーを作成
-      return 'lucky_draw_' + encodeURIComponent(appConfig.title || 'default');
+      // 企画タイトル + 賞品構成から一意のハッシュキーを生成
+      const signature = appConfig.title + '_' + appConfig.prizes.map(p => p.name).join('|');
+      return 'lucky_draw_' + safeEncodeBase64(signature).slice(0, 24);
     }
 
     // ==========================================
@@ -406,7 +443,7 @@
       badgeContainer.innerHTML = '';
       appConfig.prizes.forEach(prize => {
         const badge = document.createElement('span');
-        badge.className = "text-[11px] font-bold px-2 py-0.5 rounded-full border text-white";
+        badge.className = "text-[11px] font-bold px-2 py-0.5 rounded-full border text-white shadow-sm";
         badge.style.backgroundColor = prize.color;
         badge.style.borderColor = prize.color;
         badge.innerText = prize.name;
@@ -713,12 +750,12 @@
       const jsonStr = JSON.stringify(appConfig);
       const encoded = safeEncodeBase64(jsonStr);
       
-      // ハッシュ (#c=...) を用いて確実にパラメータを渡す（サーバーのリダイレクトやクエリ欠落を完全回避）
+      // クエリ文字列(?c=...)で発行。リダイレクトやブラウザ遷移時にも最も確実に保持されます
       const cleanUrl = window.location.origin + window.location.pathname;
-      const shareUrl = `${cleanUrl}#c=${encoded}`;
+      const shareUrl = `${cleanUrl}?c=${encodeURIComponent(encoded)}`;
 
       copyToClipboard(shareUrl);
-      showToast("参加者用の配布URLをコピーしました！");
+      showToast("参加者用の配布URLを発行＆コピーしました！");
     }
 
     function copyToClipboard(text) {
